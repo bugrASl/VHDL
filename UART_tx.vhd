@@ -31,10 +31,10 @@ architecture Behavioral of UART_tx is
     constant BitCounterLim  : integer := c_DataBit - 1;
     constant StopBitLim     : integer := (c_StopBit * c_TicksPerBit) - 1;
 
-    signal current_state : UART_TX_STATE 							:= TX_IDLE;
+    signal current_state : UART_TX_STATE 				:= TX_IDLE;
     signal TickCounter   : integer range 0 to TickCounterLim 		:= 0;
     signal BitCounter    : integer range 0 to BitCounterLim 		:= 0;
-    signal StopCounter   : integer range 0 to StopBitLim 			:= 0;
+    signal StopCounter   : integer range 0 to StopBitLim 		:= 0;
     signal ShiftRegister : std_logic_vector(c_DataBit-1 downto 0) 	:= (others => '0');
 
     procedure reset_signals is
@@ -73,7 +73,7 @@ architecture Behavioral of UART_tx is
             shift_data;
             current_state <= TX_DATA;
         else
-            TickCounter <= TickCounter + 1;
+            TickCounter	  <= TickCounter + 1;
         end if;
     end procedure;
 
@@ -102,7 +102,7 @@ architecture Behavioral of UART_tx is
             o_tx_done     <= '1';
             current_state <= TX_IDLE;
         else
-            StopCounter <= StopCounter + 1;
+            StopCounter   <= StopCounter + 1;
         end if;
     end procedure;
 /***
