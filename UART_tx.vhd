@@ -1,7 +1,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.all;
 use IEEE.NUMERIC_STD.all;
-use work.UART_FSM_pkg.all;
+
 
 entity UART_tx is
     generic (
@@ -10,11 +10,10 @@ entity UART_tx is
 		
         c_ClkFreq      	: integer 		:= 50_000_000;
         c_BaudRate     	: integer 		:= 1_843_200;
-        c_TicksPerBit  	: integer 		:= c_ClkFreq / c_BaudRate;
         c_DataBit      	: integer 		:= 8;
         c_StopBit      	: integer 		:= 2;
-	c_UseParity	: boolean 		:= true;
-	c_ParityType 	: parity_type 		:= EVEN
+		c_UseParity		: boolean 		:= true;
+		c_ParityType 	: parity_type 	:= EVEN
     );
     port (
         i_nRST      : in  std_logic;	--NEGATIVE RESET INPUT IS USED
@@ -28,19 +27,17 @@ end UART_tx;
 
 architecture Behavioral of UART_tx is
     type UART_TX_STATE is (TX_IDLE, TX_START, TX_DATA, TX_STOP);
-
-    	constant TickCounterLim : integer := c_TicksPerBit - 1;
-    	constant StopBitLim     : integer := (c_StopBit * c_TicksPerBit) - 1;
-	constant ShiftRegWidth	: integer := c_DataBit + (1 when c_UseParity else 0);
-	constant BitCounterLim	: integer := ShiftRegWidth - 1;
-	
-	signal parity_bit	 : std_logic 						:= '0';
-	signal current_state 	: UART_TX_STATE 					:= TX_IDLE;
-    	signal TickCounter   	: integer range 0 to TickCounterLim 			:= 0;
-    	signal BitCounter    	: integer range 0 to BitCounterLim 			:= 0;
-    	signal StopCounter   	: integer range 0 to StopBitLim 			:= 0;
-    	signal ShiftRegister 	: std_logic_vector(ShiftRegWidth-1 downto 0) 		:= (others => '0');
-	
+		constant c_TicksPerBit  : integer := c_ClkFreq / c_BaudRate;
+		constant TickCounterLim : integer := c_TicksPerBit - 1;
+		constant StopBitLim     : integer := (c_StopBit * c_TicksPerBit) - 1;
+		constant MAX_SHIFT_WIDTH : integer := c_DataBit + 1;
+    
+		signal parity_bit       : std_logic := '0';
+		signal current_state    : UART_TX_STATE := TX_IDLE;
+		signal TickCounter      : integer range 0 to TickCounterLim := 0;
+		signal BitCounter       : integer range 0 to MAX_SHIFT_WIDTH-1 := 0;
+		signal StopCounter      : integer range 0 to StopBitLim := 0;
+		signal ShiftRegister    : std_logic_vector(MAX_SHIFT_WIDTH-1 downto 0) := (others => '0');
 	component parity_gen is
 		generic (
         		N		: integer	:= 8;
@@ -52,16 +49,7 @@ architecture Behavioral of UART_tx is
 		);
 	end component;
 
-begin
-	parity_gen_inst : parity_gen
-        generic map (
-            N 		=> c_DataBit,
-            parity_type => c_ParityType
-        )
-        port map (
-            i_data   	=> i_data,
-            o_parity 	=> parity_bit
-        );
+	
 
     procedure reset_signals is
     begin
@@ -75,9 +63,7 @@ begin
     end procedure;
 
     procedure shift_data is
-		variable RegisterSize	:	integer	range	0	to	12	:=8;
     begin
-	RegisterSize  := ShiftRegister'high;
         ShiftRegister <= ShiftRegister(ShiftRegister'high-1 downto 0) & '0';
     end procedure;
 
@@ -85,16 +71,19 @@ begin
     begin
         o_data    <= '1';
         o_tx_done <= '0';
+
         if i_tx_start = '1' then
             if c_UseParity then
-                ShiftRegister <= i_data & parity_bit;
+                ShiftRegister(c_DataBit-1 downto 0) <= i_data;
+                ShiftRegister(c_DataBit)           <= parity_bit;
+                BitCounter <= 0;
             else
-                ShiftRegister <= i_data;
+                ShiftRegister(c_DataBit-1 downto 0) <= i_data;
+                ShiftRegister(c_DataBit)           <= '0';
+                BitCounter <= 0;
             end if;
             current_state <= TX_START;
             TickCounter   <= 0;
-        end if;
-    end procedure;
         end if;
     end procedure;
 
@@ -102,7 +91,6 @@ begin
     begin
         if TickCounter = TickCounterLim then
             TickCounter   <= 0;
-            BitCounter    <= 0;
             o_data        <= ShiftRegister(0);
             shift_data;
             current_state <= TX_DATA;
@@ -116,10 +104,11 @@ begin
         o_data <= ShiftRegister(0);
         if TickCounter = TickCounterLim then
             TickCounter <= 0;
-            if BitCounter = BitCounterLim then
-                o_data        <= '1';
-                StopCounter   <= 0;
+            if (c_UseParity and BitCounter = c_DataBit) or
+               (not c_UseParity and BitCounter = c_DataBit - 1) then
                 current_state <= TX_STOP;
+                StopCounter   <= 0;
+                o_data        <= '1';
             else
                 shift_data;
                 BitCounter <= BitCounter + 1;
@@ -146,7 +135,17 @@ begin
 	I HOPE BEGINNERS UNDERSTAND THE RELATIONSHIPS AND FSM STRUCTURE SO THAT
 	THEY WILL NOT HAVE AS DIFFICULT AS I DID
 ***/
-
+begin
+	parity_gen_inst : parity_gen
+        generic map (
+            N 		=> c_DataBit,
+            parity_type => c_ParityType
+        )
+        port map (
+            i_data   	=> i_data,
+            o_parity 	=> parity_bit
+        );	
+		
     process(i_clk)
     begin
         if rising_edge(i_clk) then
