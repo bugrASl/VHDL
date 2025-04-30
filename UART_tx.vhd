@@ -5,17 +5,19 @@ use work.UART_FSM_pkg.all;
 
 entity UART_tx is
     generic (
-		--	HERE GENERIC IS USED IN ORDER TO BE MORE FLEXIBLE
-		--	WHILE IMPLEMENTING THIS UART_TX MODULE
+	--	HERE GENERIC IS USED IN ORDER TO BE MORE FLEXIBLE
+	--	WHILE IMPLEMENTING THIS UART_TX MODULE
 		
-        c_ClkFreq      : integer := 50_000_000;
-        c_BaudRate     : integer := 1_843_200;
-        c_TicksPerBit  : integer := c_ClkFreq / c_BaudRate;
-        c_DataBit      : integer := 8;
-        c_StopBit      : integer := 2
+        c_ClkFreq      	: integer 		:= 50_000_000;
+        c_BaudRate     	: integer 		:= 1_843_200;
+        c_TicksPerBit  	: integer 		:= c_ClkFreq / c_BaudRate;
+        c_DataBit      	: integer 		:= 8;
+        c_StopBit      	: integer 		:= 2;
+	c_UseParity	: boolean 		:= true;
+	c_ParityType 	: parity_type 		:= EVEN
     );
     port (
-        i_nRST      : in  std_logic;	--	NEGATIVE RESET INPUT IS USED
+        i_nRST      : in  std_logic;	--NEGATIVE RESET INPUT IS USED
         i_clk       : in  std_logic;
         i_tx_start  : in  std_logic;
         i_data      : in  std_logic_vector(c_DataBit-1 downto 0);
@@ -27,15 +29,39 @@ end UART_tx;
 architecture Behavioral of UART_tx is
     type UART_TX_STATE is (TX_IDLE, TX_START, TX_DATA, TX_STOP);
 
-    constant TickCounterLim : integer := c_TicksPerBit - 1;
-    constant BitCounterLim  : integer := c_DataBit - 1;
-    constant StopBitLim     : integer := (c_StopBit * c_TicksPerBit) - 1;
+    	constant TickCounterLim : integer := c_TicksPerBit - 1;
+    	constant StopBitLim     : integer := (c_StopBit * c_TicksPerBit) - 1;
+	constant ShiftRegWidth	: integer := c_DataBit + (1 when c_UseParity else 0);
+	constant BitCounterLim	: integer := ShiftRegWidth - 1;
+	
+	signal parity_bit	 : std_logic 						:= '0';
+	signal current_state 	: UART_TX_STATE 					:= TX_IDLE;
+    	signal TickCounter   	: integer range 0 to TickCounterLim 			:= 0;
+    	signal BitCounter    	: integer range 0 to BitCounterLim 			:= 0;
+    	signal StopCounter   	: integer range 0 to StopBitLim 			:= 0;
+    	signal ShiftRegister 	: std_logic_vector(ShiftRegWidth-1 downto 0) 		:= (others => '0');
+	
+	component parity_gen is
+		generic (
+        		N		: integer	:= 8;
+        		parity_type	: parity_type
+		);
+		port (
+        		i_data   	: in  std_logic_vector(N-1 downto 0);
+        		o_parity 	: out std_logic
+		);
+	end component;
 
-    signal current_state : UART_TX_STATE 				:= TX_IDLE;
-    signal TickCounter   : integer range 0 to TickCounterLim 		:= 0;
-    signal BitCounter    : integer range 0 to BitCounterLim 		:= 0;
-    signal StopCounter   : integer range 0 to StopBitLim 		:= 0;
-    signal ShiftRegister : std_logic_vector(c_DataBit-1 downto 0) 	:= (others => '0');
+begin
+	parity_gen_inst : parity_gen
+        generic map (
+            N 		=> c_DataBit,
+            parity_type => c_ParityType
+        )
+        port map (
+            i_data   	=> i_data,
+            o_parity 	=> parity_bit
+        );
 
     procedure reset_signals is
     begin
@@ -49,8 +75,10 @@ architecture Behavioral of UART_tx is
     end procedure;
 
     procedure shift_data is
+		variable RegisterSize	:	integer	range	0	to	12	:=8;
     begin
-        ShiftRegister <= ShiftRegister(c_DataBit-2 downto 0) & '0';
+	RegisterSize  := ShiftRegister'high;
+        ShiftRegister <= ShiftRegister(ShiftRegister'high-1 downto 0) & '0';
     end procedure;
 
     procedure tx_idle_state is
@@ -58,9 +86,15 @@ architecture Behavioral of UART_tx is
         o_data    <= '1';
         o_tx_done <= '0';
         if i_tx_start = '1' then
-            ShiftRegister <= i_data;
+            if c_UseParity then
+                ShiftRegister <= i_data & parity_bit;
+            else
+                ShiftRegister <= i_data;
+            end if;
             current_state <= TX_START;
             TickCounter   <= 0;
+        end if;
+    end procedure;
         end if;
     end procedure;
 
@@ -105,6 +139,7 @@ architecture Behavioral of UART_tx is
             StopCounter   <= StopCounter + 1;
         end if;
     end procedure;
+	
 /***
 	BELOW IS EXPLAINED WHICH STATE OF UART_TX TRIGGERS WHICH PROCEDURE
 	THIS CHOICE OF CODING STRUCTURE IS INTENDED TO BE MORE READABLE AND BEGINNER FRIENDLY
@@ -112,7 +147,6 @@ architecture Behavioral of UART_tx is
 	THEY WILL NOT HAVE AS DIFFICULT AS I DID
 ***/
 
-begin
     process(i_clk)
     begin
         if rising_edge(i_clk) then
